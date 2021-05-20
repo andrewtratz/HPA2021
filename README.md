@@ -140,3 +140,60 @@ However, trying to use this information to optimize my ensemble on a category le
 
 # How to utilize this code:
 
+## Hardware requirements
+
+I trained these models using a Quadro RTX 5000 and RTX 2080 Super on a single system. Other configurations should be feasible, although batch sizes may need to be modified. Training leverages mixed precision so older GPUs may require some minor code modification to work properly.
+
+## Steps to build and test models
+
+1. Set up environment according to requirements.txt
+2. Copy all of the HPA competition data to your hard drive.
+3. Download all of the HPA external images (see https://www.kaggle.com/lnhtrang/hpa-public-data-download-and-hpacellseg for details) and copy to the same directory as the train images
+4. Ensure the cross-validation metadata files (random_train_cell_cv0.csv, random_train_cv0.csv, random_valid_cell_cv0.csv, random_valid_cv0.csv) are in the project root directory
+5. Segment all train and external images:
+
+**python segment.py --metadata \<path to train.csv\> --root_dir \<path to train images\> --nuc_model \<path to nucleus model from HPACellSegmentator\> --cell_model \<path to cell model from HPACellSegmentator\> --meta_dir \<path to write new metadata\> --crop_dir \<path to write cropped train cell images\> --img_dir \<path to write resized input images\> --cache_dir \<path for a temporary cache directory for cell masks\>**
+
+6. Segment all test images:
+
+**python segment.py --metadata \<path to sample_submission.csv\> --root_dir \<path to test images\> --nuc_model \<path to nucleus model from HPACellSegmentator\> --cell_model \<path to cell model from HPACellSegmentator\> --meta_dir \<path to write new metadata\> --crop_dir \<path to write cropped test cell images\> --img_dir \<path to write resized test images\> --cache_dir \<path for a temporary cache directory for cell masks\>**
+
+7. Train cell model for six epochs
+
+**python train.py --out_dir Cell_BCE --loss BCE --gpu_id \<IDs of GPUs to use\> --arch class_densenet121_dropout --scheduler AdamShortRun --epochs 6 --num_classes 19 --img_size 768 --crop_size 512 --batch_size 17 --effective_batch 34 --split_name random_folds10 --fold 0 --workers 8 --in_channels 4 --puzzle 0 --cell cell --resume \<path to BFpretrain.pth\> --preload bestfitting --result_dir \<base directory where model outputs should be stored\> --img_path \<path to the cropped cell images\>
+
+8. Train cell model for one epoch using Focal Loss
+
+**python train.py --out_dir Cell_Focal --loss Focal --gpu_id \<IDs of GPUs to use\> --arch class_densenet121_dropout --scheduler AdamShortRun --epochs 6 --num_classes 19 --img_size 768 --crop_size 512 --batch_size 17 --effective_batch 34 --split_name random_folds10 --fold 0 --workers 8 --in_channels 4 --puzzle 0 --cell cell --resume \<result_dir\>\\models\\Cell_BCE\\fold0\\004.pth --preload self --result_dir \<result_dir\> --img_path \<path to the cropped cell images\>**
+
+9. Train image model using Focal Loss
+
+**python train.py --out_dir Image_Focal --loss Focal --gpu_id \<IDs of GPUs to use\> --arch class_densenet121_dropout --scheduler AdamAndrew35 --epochs 35 --num_classes 19 --img_size 768 --crop_size 512 --batch_size 17 --effective_batch 34 --split_name random_folds10 --fold 0 --workers 8 --in_channels 4 --puzzle 0 --cell image --resume \<path to BFpretrain.pth\> --preload bestfitting --result_dir \<result_dir\> --img_path \<path to the resized images\>**
+
+10. Run inference using the three models
+
+**python test.py --base_dir \<result_dir\> --out_dir Cell_BCE --gpu_id \<IDs of GPUs to use\> --arch class_densenet121_dropout --predict_epoch 6 --augment all --num_classes 19 --img_size 768 --crop_size 512 --batch_size 30 --fold 0 --workers 8 --in_channels 4 --puzzle 0 --seed 1 --dataset test --img_dir \<path to test cell crops\> --cellorimage cell**
+
+**python test.py --base_dir \<result_dir\> --out_dir Cell_Focal --gpu_id \<IDs of GPUs to use\> --arch class_densenet121_dropout --predict_epoch 6 --augment all --num_classes 19 --img_size 768 --crop_size 512 --batch_size 30 --fold 0 --workers 8 --in_channels 4 --puzzle 0 --seed 1 --dataset test --img_dir \<path to test cell crops\> --cellorimage cell**
+
+**python test.py --base_dir \<result_dir\> --out_dir Image_Focal --gpu_id \<IDs of GPUs to use\> --arch class_densenet121_dropout --predict_epoch \<best epoch\> --augment all --num_classes 19 --img_size 768 --crop_size 512 --batch_size 30 --fold 0 --workers 8 --in_channels 4 --puzzle 0 --seed 1 --dataset test --img_dir \<path to resized images\> --cellorimage image**
+
+11. Reformat the prediction outputs
+
+**python convertpredictions.py --dataset test --augment all --model Cell_BCE --epoch 6 --cellorimage cell --seeds 1 --rank 0 --predictions_path \<result_dir\>\\submissions --meta_csv_path \<path sample_submission.csv\> --cell_meta_csv_path \<path to metadata file generated during Segmentation step\> --out_path \<path to output location -- use project directory by default\> --add_datetime 0 --batch_size 100**
+
+**python convertpredictions.py --dataset test --augment all --model Cell_Focal --epoch 6 --cellorimage cell --seeds 1 --rank 0 --predictions_path \<result_dir\>\\submissions --meta_csv_path \<path sample_submission.csv\> --cell_meta_csv_path \<path to metadata file generated during Segmentation step\> --out_path \<path to output location -- use project directory by default\> --add_datetime 0 --batch_size 100**
+
+**python convertpredictions.py --dataset test --augment all --model ImageFocal --epoch \<best epoch\> --cellorimage image --seeds 1 --rank 0 --predictions_path \<result_dir\>\\submissions --meta_csv_path \<path sample_submission.csv\> --cell_meta_csv_path \<path to metadata file generated during Segmentation step\> --out_path \<path to output location -- use project directory by default\> --add_datetime 0 --batch_size 100**
+
+12. Edit ensemble_kaggle016.csv to point to the paths of the 3 outputs of the prior step
+
+13. Ensemble and generate submission.csv
+
+**python ensemble.py \<path to ensemble_kaggle016.csv\> --dataset test --submission 1 --rank 0 --meta_csv \<path sample_submission.csv\> --cell_meta_csv_path \<path to metadata file generated during Segmentation step\> --out_path \<path to output location\> --add_datetime 0 --batch_size 100**
+
+Thank you! Feel free to share any comments or feedback you have on this solution or its description.
+
+
+
+
