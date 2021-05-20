@@ -140,6 +140,8 @@ However, trying to use this information to optimize my ensemble on a category le
 
 # How to utilize this code:
 
+Please use the latest release for copies of the pretrained weights and CV files.
+
 ## Hardware requirements
 
 I trained these models using a Quadro RTX 5000 and RTX 2080 Super on a single system. Other configurations should be feasible, although batch sizes may need to be modified. Training leverages mixed precision so older GPUs may require some minor code modification to work properly.
